@@ -1,7 +1,39 @@
-import bluetooth
+import argparse
+import csv
+import json
+import sys
+import time
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
-# Major and Minor Device Class definitions based on Bluetooth specifications
-MAJOR_CLASSES = {
+try:
+    import bluetooth
+except ImportError:
+    print(
+        "[ERROR] PyBluez ('bluetooth') module not found.\n"
+        "        Install it via: pip install pybluez\n"
+        "        Note: For Bluetooth Low Energy (BLE), consider using 'bleak' instead.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# Bluetooth SIG Major Service Classes (Bits 13 to 23 of Class of Device)
+MAJOR_SERVICE_CLASSES: Dict[int, str] = {
+    13: "Limited Discoverable Mode",
+    14: "LE Audio",
+    15: "Reserved",
+    16: "Positioning (Location identification)",
+    17: "Networking (LAN, Ad hoc)",
+    18: "Rendering (Printing, Speaker)",
+    19: "Capturing (Scanner, Microphone)",
+    20: "Object Transfer (v-Inbox, v-Folder)",
+    21: "Audio (Speaker, Microphone, Headset)",
+    22: "Telephony (Cordless, Modem, Headset)",
+    23: "Information (WEB-server, WAP-server)",
+}
+
+# Bluetooth SIG Major Device Classes (Bits 8 to 12)
+MAJOR_CLASSES: Dict[int, str] = {
     0: "Miscellaneous",
     1: "Computer",
     2: "Phone",
@@ -12,73 +44,285 @@ MAJOR_CLASSES = {
     7: "Wearable",
     8: "Toy",
     9: "Health",
-    10: "Uncategorized"
+    31: "Uncategorized",
 }
 
-MINOR_CLASSES = {
-    # Computer Major Class
-    (1, 0): "Uncategorized Computer", (1, 1): "Desktop Workstation",
-    (1, 2): "Server-class Computer", (1, 3): "Laptop", (1, 4): "Handheld PC/PDA",
-    (1, 5): "Palm-sized PC/PDA", (1, 6): "Wearable computer",
-    # Phone Major Class
-    (2, 0): "Uncategorized Phone", (2, 1): "Cellular", (2, 2): "Cordless",
-    (2, 3): "Smartphone", (2, 4): "Wired modem or voice gateway",
+# Standard Minor Classes for Computer (1), Phone (2), A/V (4), Wearable (7), Toy (8), Health (9)
+MINOR_CLASSES: Dict[Tuple[int, int], str] = {
+    # Computer Major Class (1)
+    (1, 0): "Uncategorized",
+    (1, 1): "Desktop Workstation",
+    (1, 2): "Server-class Computer",
+    (1, 3): "Laptop",
+    (1, 4): "Handheld PC/PDA",
+    (1, 5): "Palm-sized PC/PDA",
+    (1, 6): "Wearable Computer",
+    (1, 7): "Tablet",
+    # Phone Major Class (2)
+    (2, 0): "Uncategorized",
+    (2, 1): "Cellular",
+    (2, 2): "Cordless",
+    (2, 3): "Smartphone",
+    (2, 4): "Wired Modem or Voice Gateway",
     (2, 5): "Common ISDN Access",
-    # LAN/Network Access Major Class
-    (3, 0): "Fully available", (3, 1): "1% to 17% utilized",
-    (3, 2): "17% to 33% utilized", (3, 3): "33% to 50% utilized",
-    (3, 4): "50% to 67% utilized", (3, 5): "67% to 83% utilized",
-    (3, 6): "83% to 99% utilized", (3, 7): "No service available",
-    # Audio/Video Major Class
-    (4, 0): "Uncategorized A/V", (4, 1): "Wearable Headset", (4, 2): "Hands-free Device",
-    (4, 3): "Microphone", (4, 4): "Loudspeaker", (4, 5): "Headphones", (4, 6): "Portable Audio",
-    (4, 7): "Car audio", (4, 8): "Set-top box", (4, 9): "HiFi Audio Device",
-    (4, 10): "VCR", (4, 11): "Video Camera", (4, 12): "Camcorder",
-    (4, 13): "Video Monitor", (4, 14): "Video Display and Loudspeaker",
-    (4, 15): "Video Conferencing", (4, 16): "Gaming/Toy",
-    # Peripheral Major Class
-    (5, 0): "Not Keyboard/Not Pointing Device", (5, 1): "Keyboard",
-    (5, 2): "Pointing device", (5, 3): "Combo Keyboard/Pointing device",
-    # Imaging Major Class
-    (6, 0): "Display", (6, 1): "Camera", (6, 2): "Scanner", (6, 3): "Printer",
-    # Wearable Major Class
-    (7, 0): "Wristwatch", (7, 1): "Pager", (7, 2): "Jacket",
-    (7, 3): "Helmet", (7, 4): "Glasses",
-    # Toy Major Class
-    (8, 0): "Robot", (8, 1): "Vehicle",
-    (8, 2): "Doll / Action figure",
-    (8, 3): "Controller", (8, 4): "Game",
-    # Health Major Class
-    (9, 0): "Undefined", (9, 1): "Blood Pressure Monitor",
-    (9, 2): "Thermometer", (9, 3): "Weighing Scale",
-    (9, 4): "Glucose Meter", (9, 5): "Pulse Oximeter",
-    (9, 6): "Heart/Pulse Rate Monitor", (9, 7): "Health Data Display",
-    (9, 8): "Step Counter", (9, 9): "Body Composition Analyzer",
-    (9, 10): "Peak Flow Monitor", (9, 11): "Medication Monitor",
-    (9, 12): "Knee Prosthesis", (9, 13): "Ankle Prosthesis",
-    # More specific definitions can be added if needed
+    # Audio/Video Major Class (4)
+    (4, 0): "Uncategorized",
+    (4, 1): "Wearable Headset",
+    (4, 2): "Hands-free Device",
+    (4, 3): "Reserved",
+    (4, 4): "Microphone",
+    (4, 5): "Loudspeaker",
+    (4, 6): "Headphones",
+    (4, 7): "Portable Audio",
+    (4, 8): "Car Audio",
+    (4, 9): "Set-top Box",
+    (4, 10): "HiFi Audio Device",
+    (4, 11): "VCR",
+    (4, 12): "Video Camera",
+    (4, 13): "Camcorder",
+    (4, 14): "Video Monitor",
+    (4, 15): "Video Display and Loudspeaker",
+    (4, 16): "Video Conferencing",
+    (4, 18): "Gaming/Toy",
+    # Wearable Major Class (7) - 1-indexed per Bluetooth SIG spec
+    (7, 1): "Wristwatch",
+    (7, 2): "Pager",
+    (7, 3): "Jacket",
+    (7, 4): "Helmet",
+    (7, 5): "Glasses",
+    # Toy Major Class (8) - 1-indexed per Bluetooth SIG spec
+    (8, 1): "Robot",
+    (8, 2): "Vehicle",
+    (8, 3): "Doll / Action Figure",
+    (8, 4): "Controller",
+    (8, 5): "Game",
+    # Health Major Class (9)
+    (9, 0): "Undefined",
+    (9, 1): "Blood Pressure Monitor",
+    (9, 2): "Thermometer",
+    (9, 3): "Weighing Scale",
+    (9, 4): "Glucose Meter",
+    (9, 5): "Pulse Oximeter",
+    (9, 6): "Heart/Pulse Rate Monitor",
+    (9, 7): "Health Data Display",
+    (9, 8): "Step Counter",
+    (9, 9): "Body Composition Analyzer",
+    (9, 10): "Peak Flow Monitor",
+    (9, 11): "Medication Monitor",
+    (9, 12): "Knee Prosthesis",
+    (9, 13): "Ankle Prosthesis",
+    (9, 14): "Generic Health Manager",
+    (9, 15): "Personal Mobility Device",
 }
 
-def parse_device_class(device_class):
-    major = (device_class >> 8) & 0x1F # divide by 2**8 and mask with 0x1F (take the last 5 bits)
-    minor = (device_class >> 2) & 0x3F # divide by 2**2 and mask with 0x3F (take the last 6 bits)
-    major_class_name = MAJOR_CLASSES.get(major, "Unknown Major Class")
-    minor_class_key = (major, minor)
-    minor_class_name = MINOR_CLASSES.get(minor_class_key, "Unknown Minor Class")
-    return major_class_name, minor_class_name
+LAN_LOAD_FACTORS: Dict[int, str] = {
+    0: "Fully available",
+    1: "1% to 17% utilized",
+    2: "17% to 33% utilized",
+    3: "33% to 50% utilized",
+    4: "50% to 67% utilized",
+    5: "67% to 83% utilized",
+    6: "83% to 99% utilized",
+    7: "No service available",
+}
 
-def scan_bluetooth_devices():
+PERIPHERAL_TOP_BITS: Dict[int, str] = {
+    0: "Not Keyboard / Not Pointing Device",
+    1: "Keyboard",
+    2: "Pointing Device",
+    3: "Combo Keyboard/Pointing Device",
+}
+
+PERIPHERAL_SUBTYPES: Dict[int, str] = {
+    0: "Uncategorized",
+    1: "Joystick",
+    2: "Gamepad",
+    3: "Remote Control",
+    4: "Sensing Device",
+    5: "Digitizer Tablet",
+    6: "Card Reader",
+    7: "Digital Pen",
+    8: "Handheld Scanner (Bar-code/RFID)",
+    9: "Handheld Gestural Input Device",
+}
+
+
+def parse_device_class(device_class: Optional[int]) -> Tuple[str, str, List[str]]:
+    """
+    Decodes Major Class, Minor Class, and Major Service Classes from a 24-bit CoD integer.
+    """
+    if device_class is None:
+        return "Unknown", "Unknown", []
+
+    # 1. Decode Major Service Classes (Bits 13-23)
+    service_classes = [
+        name for bit, name in MAJOR_SERVICE_CLASSES.items() if device_class & (1 << bit)
+    ]
+
+    # 2. Decode Major Device Class (Bits 8-12)
+    major = (device_class >> 8) & 0x1F
+    major_name = MAJOR_CLASSES.get(major, f"Unknown Major ({major})")
+
+    # 3. Decode Minor Device Class (Bits 2-7)
+    minor = (device_class >> 2) & 0x3F
+
+    if major == 3:  # LAN/Network Access uses top 3 bits of minor field (bits 5-7)
+        load_factor = (minor >> 3) & 0x07
+        minor_name = LAN_LOAD_FACTORS.get(load_factor, "Unknown Load Factor")
+    elif major == 5:  # Peripheral splits top 2 bits and bottom 4 bits
+        top_role = PERIPHERAL_TOP_BITS.get((minor >> 4) & 0x03, "Unknown")
+        sub_role = PERIPHERAL_SUBTYPES.get(minor & 0x0F, "Other")
+        minor_name = f"{top_role} ({sub_role})" if sub_role != "Uncategorized" else top_role
+    elif major == 6:  # Imaging uses bits 4-7 as a combinable bitmask
+        imaging_types = []
+        if minor & 0b000100:
+            imaging_types.append("Display")
+        if minor & 0b001000:
+            imaging_types.append("Camera")
+        if minor & 0b010000:
+            imaging_types.append("Scanner")
+        if minor & 0b100000:
+            imaging_types.append("Printer")
+        minor_name = ", ".join(imaging_types) if imaging_types else "Uncategorized Imaging"
+    else:
+        minor_name = MINOR_CLASSES.get((major, minor), f"Unknown Minor ({minor})")
+
+    return major_name, minor_name, service_classes
+
+
+def get_device_services(address: str) -> List[Dict[str, str]]:
+    """Queries SDP services exposed by a target Bluetooth MAC address."""
+    discovered_services = []
     try:
-        discovered_devices = bluetooth.discover_devices(duration=8, lookup_names=True, lookup_class=True)
-        print('[!] Scanning for Bluetooth devices...')
-        print(f"[!] Found {len(discovered_devices)} Devices")
-        for addr, name, device_class in discovered_devices:
-            major_class, minor_class = parse_device_class(device_class)
-            print(f"[+] Device Name: {name}")
-            print(f"    Address: {addr}")
-            print(f"    Device Class: {device_class} ({major_class}, {minor_class})")
-    except Exception as e:
-        print(f"[ERROR] An error occurred: {e}")
+        raw_services = bluetooth.find_service(address=address)
+        for svc in raw_services:
+            name = svc.get("name")
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", errors="replace")
+            discovered_services.append({
+                "name": name or "Unnamed Service",
+                "protocol": str(svc.get("protocol") or "Unknown"),
+                "port": str(svc.get("port") or "N/A"),
+                "description": str(svc.get("description") or ""),
+            })
+    except bluetooth.BluetoothError as err:
+        print(f"    [!] SDP query failed for {address}: {err}", file=sys.stderr)
+    return discovered_services
+
+
+def scan_once(duration: int, lookup_services: bool) -> List[Dict]:
+    """Performs a single Bluetooth inquiry scan and returns structured results."""
+    print(f"[*] Scanning for Bluetooth devices (Duration: {duration}s)...")
+    raw_devices = bluetooth.discover_devices(
+        duration=duration,
+        lookup_names=True,
+        lookup_class=True,
+        flush_cache=True,
+    )
+
+    results = []
+    timestamp = datetime.now().isoformat(timespec="seconds")
+
+    for addr, name, dev_class in raw_devices:
+        if isinstance(name, bytes):
+            name = name.decode("utf-8", errors="replace")
+        name = name or "Unknown/Hidden Name"
+
+        major_cls, minor_cls, svc_classes = parse_device_class(dev_class)
+        device_entry = {
+            "timestamp": timestamp,
+            "address": addr,
+            "name": name,
+            "raw_class_hex": f"0x{dev_class:06X}" if dev_class is not None else "N/A",
+            "major_class": major_cls,
+            "minor_class": minor_cls,
+            "service_classes": svc_classes,
+            "sdp_services": [],
+        }
+
+        if lookup_services:
+            device_entry["sdp_services"] = get_device_services(addr)
+
+        results.append(device_entry)
+
+    return results
+
+
+def display_results(devices: List[Dict], lookup_services: bool) -> None:
+    """Formats and prints discovered Bluetooth devices to the console."""
+    print(f"[+] Found {len(devices)} device(s).")
+    if not devices:
+        return
+
+    print("-" * 68)
+    for dev in devices:
+        svc_str = ", ".join(dev["service_classes"]) if dev["service_classes"] else "None reported"
+        print(f"[+] Device Name     : {dev['name']}")
+        print(f"    MAC Address     : {dev['address']}")
+        print(f"    Class of Device : {dev['raw_class_hex']} ({dev['major_class']} -> {dev['minor_class']})")
+        print(f"    Capabilities    : {svc_str}")
+
+        if lookup_services:
+            sdp_list = dev["sdp_services"]
+            if sdp_list:
+                print(f"    SDP Services ({len(sdp_list)}):")
+                for s in sdp_list:
+                    print(f"      - {s['name']} [Protocol: {s['protocol']}, Port/Ch: {s['port']}]")
+            else:
+                print("    SDP Services    : None discovered")
+        print("-" * 68)
+
+
+def export_results(devices: List[Dict], json_path: Optional[str], csv_path: Optional[str]) -> None:
+    """Saves scan results to JSON and/or CSV files."""
+    if json_path:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(devices, f, indent=2, ensure_ascii=False)
+        print(f"[*] Exported results to JSON: {json_path}")
+
+    if csv_path and devices:
+        fieldnames = [
+            "timestamp", "address", "name", "raw_class_hex",
+            "major_class", "minor_class", "service_classes"
+        ]
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for d in devices:
+                row = {k: d[k] for k in fieldnames}
+                row["service_classes"] = "; ".join(d["service_classes"])
+                writer.writerow(row)
+        print(f"[*] Exported results to CSV: {csv_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Bluetooth Classic CoD & SDP Scanner")
+    parser.add_argument("-d", "--duration", type=int, default=8, help="Scan duration in seconds (default: 8)")
+    parser.add_argument("-s", "--services", action="store_true", help="Enumerate SDP services per device")
+    parser.add_argument("-w", "--watch", type=int, metavar="SEC", help="Rescan continuously every SEC seconds")
+    parser.add_argument("--json", metavar="FILE", help="Export discovered devices to a JSON file")
+    parser.add_argument("--csv", metavar="FILE", help="Export discovered devices to a CSV file")
+    args = parser.parse_args()
+
+    try:
+        while True:
+            devices = scan_once(duration=args.duration, lookup_services=args.services)
+            display_results(devices, lookup_services=args.services)
+            export_results(devices, json_path=args.json, csv_path=args.csv)
+
+            if not args.watch:
+                break
+            print(f"[*] Waiting {args.watch} seconds before next scan (Press Ctrl+C to stop)...\n")
+            time.sleep(args.watch)
+
+    except KeyboardInterrupt:
+        print("\n[!] Scan interrupted by user. Exiting.")
+    except bluetooth.BluetoothError as err:
+        print(f"[ERROR] Bluetooth stack error: {err}", file=sys.stderr)
+        print("        Ensure your Bluetooth adapter is enabled and you have sufficient permissions.", file=sys.stderr)
+    except Exception as err:
+        print(f"[ERROR] Unexpected failure: {err}", file=sys.stderr)
+
 
 if __name__ == "__main__":
-    scan_bluetooth_devices()
+    main()
