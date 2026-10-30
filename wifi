@@ -324,5 +324,3 @@ def main() -> None:
         print(f"[ERROR] Unexpected failure: {err}", file=sys.stderr)
 
 
-if __name__ == "__main__":
-    main()
